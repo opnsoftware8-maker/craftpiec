@@ -1,0 +1,8 @@
+{
+  "name": "CraftPiece - First Island",
+  "description": "3D island model viewer for CraftPiece with Three.js.",
+  "capabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ],
+  "permissions": []
+}

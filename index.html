@@ -4,10 +4,42 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
   <title>CraftPiece - First Island</title>
+  <meta name="description" content="CraftPiece - First Island 3D Model">
   <script src="https://cdn.tailwindcss.com"></script>
+
+  <!-- Import Map เพื่อให้เบราว์เซอร์และ Vercel โหลด three และ three/addons ได้โดยไม่เกิดจอขาว -->
+  <script type="importmap">
+  {
+    "imports": {
+      "three": "https://cdn.jsdelivr.net/npm/three@0.174.0/build/three.module.js",
+      "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.174.0/examples/jsm/"
+    }
+  }
+  </script>
+
+  <!-- สคริปต์ดักจับ Error แสดงผลบนหน้าจอมือถืออัตโนมัติ -->
+  <script>
+    window.addEventListener('error', function (e) {
+      var box = document.getElementById('error-display');
+      if (box) {
+        box.style.display = 'block';
+        box.innerHTML = '<b>JavaScript Error:</b><br>' + (e.message || e);
+      }
+    });
+    window.addEventListener('unhandledrejection', function (e) {
+      var box = document.getElementById('error-display');
+      if (box) {
+        box.style.display = 'block';
+        box.innerHTML = '<b>Unhandled Promise Error:</b><br>' + (e.reason ? (e.reason.message || e.reason) : e);
+      }
+    });
+  </script>
 </head>
 
-<body class="m-0 h-screen w-screen overflow-hidden select-none">
+<body class="m-0 h-screen w-screen overflow-hidden select-none bg-sky-300">
+  <!-- กล่องแสดง Error บนมือถือหากเกิดข้อผิดพลาดในการโหลดโมดูล -->
+  <div id="error-display" style="display:none; position:fixed; bottom:12px; left:12px; right:12px; z-index:9999; background:#ef4444; color:#ffffff; padding:12px; border-radius:8px; font-family:monospace; font-size:12px; word-break:break-all;"></div>
+
   <script type="module" src="./src/main.js"></script>
 </body>
 </html>

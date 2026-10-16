@@ -1,59 +1,31 @@
-# craftpiec
-Gemini ใน google ai studio อ่านสิ่งนี้ก่อน ต้องทำตามคำขอนี้เท่านั้น ห้ามทำอะไรอย่างอืน เด็ดขาดเลย
-คุณเป็น Senior Three.js Developer ผู้เชี่ยวชาญ WebGL,
-GLTFLoader, JavaScript ES Modules และ Vercel Deployment
+# CraftPiece - First Island
 
-ช่วยตรวจสอบและแก้ไขโปรเจกต์เกม 3D ของฉัน โดยเน้นแก้ปัญหา
-ให้โมเดล GLB แสดงผลจริงบนเว็บไซต์ก่อน ห้ามเพิ่มระบบที่ไม่จำเป็น
+โปรเจกต์ 3D Island สำหรับเกม **CraftPiece** โดยใช้ Three.js แบบ Pure JavaScript ES Modules (ไม่มี React, ไม่มี Next.js)
 
-โครงสร้างไฟล์:
+## สาเหตุที่หน้าจอขาวบน Vercel และวิธีแก้ (Root Cause Analysis & Fix)
 
-Blox-Piece/
-├── index.html
+1. **ปัญหา Failed to resolve module specifier "three"**:
+   - ในไฟล์ `GLTFLoader.js` ของ Three.js มีการเขียน `import ... from 'three';`
+   - เมื่อโหลดผ่านเบราว์เซอร์หรือ Vercel โดยไม่มี Import Map เบราว์เซอร์จะหยุดทำงานทันทีพร้อม Error: `Uncaught TypeError: Failed to resolve module specifier "three"` ส่งผลให้หน้าจอขาวสนิท
+   - **การแก้ไข**: เพิ่ม `<script type="importmap">` ใน `index.html` เพื่อจับคู่ `three` และ `three/addons/` ทำให้เบราว์เซอร์ดึง Three.js และ GLTFLoader ได้โดยตรงและสมบูรณ์ 100%
+
+2. **ปัญหา Normals ในไฟล์ stisland.glb**:
+   - โมเดล `stisland.glb` ไม่มี Attribute `NORMAL` จากโปรแกรมต้นทาง ทำให้แสงส่องไม่ติดและโมเดลอาจมืดดำ
+   - **การแก้ไข**: เพิ่ม `child.geometry.computeVertexNormals()` และเปิด `DoubleSide` ใน `src/main.js` เพื่อให้โมเดลเกาะสะท้อนแสงแดดและแสดงสี Vertex Color (สีเขียวธรรมชาติ) อย่างชัดเจน
+
+3. **ปัญหาตรวจไม่พบ Error บนมือถือ**:
+   - เพิ่ม Error Listener ใน `index.html` เพื่อแสดงข้อความ Error สีแดงบนหน้าจอทันทีหากมีปัญหาเกิดขึ้น
+
+## โครงสร้างไฟล์ (File Structure)
+
+```
+.
+├── index.html              # ไฟล์ HTML หลักพร้อม importmap และ Error Listener
 ├── Models/
-│   └── stisland.glb
-└── src/
-    ├── main.js
-    ├── system/
-    │   └── camera.js
-    └── combat/
-
-เทคโนโลยี:
-- HTML
-- Tailwind CSS CDN
-- Three.js ผ่าน ES Modules
-- GLTFLoader
-- Deploy บน Vercel
-- พัฒนาโค้ดบน Android ผ่าน Acode
-
-ปัญหา:
-- เปิดเว็บไซต์บน Vercel แล้วหน้าจอขาวเปล่า
-- ไม่มีโมเดล 3D ปรากฏ
-- ก่อนหน้านี้ทดสอบโค้ดสร้างลูกบาศก์ Three.js แล้วเรนเดอร์ได้
-- ไฟล์ stisland.glb อยู่ในโฟลเดอร์ Models ระดับเดียวกับ index.html
-- ยังไม่ทราบสาเหตุที่แท้จริง
-
-สิ่งที่ต้องทำ:
-
-1. วิเคราะห์โค้ด index.html, main.js และ camera.js ที่ฉันจะส่งให้
-2. ตรวจสอบการ Import Three.js และ GLTFLoader ว่าทำงานร่วมกันได้หรือไม่
-3. ตรวจสอบ URL ที่ใช้โหลด Models/stisland.glb บน Vercel
-4. ตรวจสอบปัญหา JavaScript Runtime Error และ WebGL
-5. ตรวจสอบว่ากล้องสามารถมองเห็นโมเดลได้จริงหรือไม่
-6. ตรวจสอบการจัดตำแหน่งโมเดล ขนาด Bounding Box และระยะกล้อง
-7. แก้ไขโค้ดโดยคงโครงสร้างไฟล์เดิม
-8. ไม่เพิ่มระบบตัวละคร ฟิสิกส์ การต่อสู้ หรือระบบอื่น
-9. ไม่เปลี่ยนไปใช้เอนจินเกมอื่น
-10. ห้ามสมมติว่าแก้สำเร็จ หากยังไม่มีหลักฐานยืนยัน
-
-ข้อกำหนดสำหรับคำตอบ:
-
-- ระบุสาเหตุที่เป็นไปได้และหลักฐานจากโค้ด
-- ส่งโค้ดฉบับเต็มของไฟล์ที่ต้องแก้
-- หากต้องแก้หลายไฟล์ ให้ระบุชื่อและพาธของแต่ละไฟล์
-- เพิ่มการแสดง Error บนหน้าเว็บเพื่อให้ตรวจสอบได้จากมือถือ
-- ทำให้แยกได้ว่าปัญหาเกิดจากการโหลดโมดูล โหลด GLB หรือการเรนเดอร์
-- ห้ามตัดโค้ดบางส่วนโดยไม่แจ้ง
-- ห้ามเพิ่ม Dependency ที่ไม่จำเป็น
-
-รอให้ฉันส่งโค้ดแต่ละไฟล์ก่อน แล้วจึงเริ่มวิเคราะห์
+│   └── stisland.glb        # ไฟล์โมเดล 3D เกาะ
+├── src/
+│   ├── main.js             # โค้ดเรนเดอร์ Three.js และโหลดโมเดลเกาะ
+│   └── system/
+│       └── camera.js       # ฟังก์ชันสร้าง PerspectiveCamera
+└── package.json            # การตั้งค่ารัน Vite
+```

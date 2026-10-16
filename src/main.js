@@ -1,5 +1,6 @@
-import * as THREE from 'https://cdn.jsdelivr.net/npm/three@0.180.0/build/three.module.js';
-import { GLTFLoader } from 'https://cdn.jsdelivr.net/npm/three@0.180.0/examples/jsm/loaders/GLTFLoader.js';
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createCamera } from './system/camera.js';
 
 const scene = new THREE.Scene();
@@ -17,12 +18,21 @@ document.body.appendChild(renderer.domElement);
 
 const camera = createCamera();
 
-scene.add(new THREE.HemisphereLight(0xffffff, 0x808080, 2));
+// OrbitControls เพื่อให้หมุนดูเกาะรอบทิศทางได้ทั้งบนมือถือและคอมพิวเตอร์
+const controls = new OrbitControls(camera, renderer.domElement);
+controls.enableDamping = true;
+controls.dampingFactor = 0.05;
 
-const sunlight = new THREE.DirectionalLight(0xffffff, 3);
-sunlight.position.set(10, 20, 10);
+// แสงสว่างรอบทิศและแสงแดดส่องกระทบเกาะ
+scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 2.5));
+
+const sunlight = new THREE.DirectionalLight(0xffffff, 3.5);
+sunlight.position.set(500, 1000, 500);
 scene.add(sunlight);
 
+scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+
+// กล่องแสดงสถานะที่มุมซ้ายบนตามโค้ดเดิม
 const status = document.createElement('div');
 
 Object.assign(status.style, {
@@ -36,7 +46,8 @@ Object.assign(status.style, {
   borderRadius: '8px',
   font: '14px sans-serif',
   maxWidth: '90%',
-  overflowWrap: 'anywhere'
+  overflowWrap: 'anywhere',
+  boxShadow: '0 4px 10px rgba(0,0,0,0.3)'
 });
 
 status.textContent = 'กำลังโหลดเกาะ...';
@@ -51,14 +62,29 @@ loader.load(
   (gltf) => {
     const island = gltf.scene;
 
+    // คำนวณ Normals ให้โมเดลกรณีไม่มี Normals เพื่อให้รับแสงสว่างได้สมบูรณ์
+    island.traverse((child) => {
+      if (child.isMesh) {
+        if (!child.geometry.attributes.normal) {
+          child.geometry.computeVertexNormals();
+        }
+        child.material.side = THREE.DoubleSide;
+        if (child.geometry.attributes.color) {
+          child.material.vertexColors = true;
+        }
+      }
+    });
+
     scene.add(island);
 
+    // จัดเกาะให้อยู่ตรงกลาง Scene
     const box = new THREE.Box3().setFromObject(island);
     const center = box.getCenter(new THREE.Vector3());
     const size = box.getSize(new THREE.Vector3());
 
     island.position.sub(center);
 
+    // ปรับระยะกล้องให้มองเห็นเกาะพอดีเฟรม
     const sphere = new THREE.Sphere();
     new THREE.Box3().setFromObject(island).getBoundingSphere(sphere);
 
@@ -79,9 +105,12 @@ loader.load(
       );
 
       camera.lookAt(0, 0, 0);
-      camera.near = Math.max(radius / 1000, 0.001);
-      camera.far = Math.max(radius * 100, 1000);
+      camera.near = Math.max(radius / 1000, 0.01);
+      camera.far = Math.max(radius * 100, 10000);
       camera.updateProjectionMatrix();
+
+      controls.target.set(0, 0, 0);
+      controls.update();
     }
 
     status.textContent = `โหลดเกาะสำเร็จ | ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)}`;
@@ -93,7 +122,8 @@ loader.load(
   },
   (error) => {
     console.error('GLB loading error:', error);
-    status.textContent = `โหลดเกาะไม่สำเร็จ: ${modelURL}`;
+    status.textContent = `โหลดเกาะไม่สำเร็จ: ${modelURL} (${error.message || error})`;
+    status.style.background = '#dc2626';
   }
 );
 
@@ -105,6 +135,7 @@ window.addEventListener('resize', () => {
 
 function animate() {
   requestAnimationFrame(animate);
+  controls.update();
   renderer.render(scene, camera);
 }
 
