@@ -18,7 +18,7 @@ document.body.appendChild(renderer.domElement);
 
 const camera = createCamera();
 
-// OrbitControls เพื่อให้หมุนดูเกาะรอบทิศทางได้ทั้งบนมือถือและคอมพิวเตอร์
+// OrbitControls ให้หมุนดูเกาะรอบทิศทางได้ทั้งบนมือถือและคอมพิวเตอร์
 const controls = new OrbitControls(camera, renderer.domElement);
 controls.enableDamping = true;
 controls.dampingFactor = 0.05;
@@ -32,7 +32,7 @@ scene.add(sunlight);
 
 scene.add(new THREE.AmbientLight(0xffffff, 1.2));
 
-// กล่องแสดงสถานะที่มุมซ้ายบนตามโค้ดเดิม
+// กล่องแสดงสถานะที่มุมซ้ายบน
 const status = document.createElement('div');
 
 Object.assign(status.style, {
@@ -53,79 +53,88 @@ Object.assign(status.style, {
 status.textContent = 'กำลังโหลดเกาะ...';
 document.body.appendChild(status);
 
-const modelURL = new URL('/Models/stisland.glb', window.location.origin).href;
-
 const loader = new GLTFLoader();
 
-loader.load(
-  modelURL,
-  (gltf) => {
-    const island = gltf.scene;
+function loadIsland(url, isFallback = false) {
+  loader.load(
+    url,
+    (gltf) => {
+      const island = gltf.scene;
 
-    // คำนวณ Normals ให้โมเดลกรณีไม่มี Normals เพื่อให้รับแสงสว่างได้สมบูรณ์
-    island.traverse((child) => {
-      if (child.isMesh) {
-        if (!child.geometry.attributes.normal) {
-          child.geometry.computeVertexNormals();
+      // คำนวณ Normals ให้โมเดลกรณีไม่มี Normals เพื่อให้รับแสงสว่างและแสดงสีได้สวยงาม
+      island.traverse((child) => {
+        if (child.isMesh) {
+          if (!child.geometry.attributes.normal) {
+            child.geometry.computeVertexNormals();
+          }
+          child.material.side = THREE.DoubleSide;
+          if (child.geometry.attributes.color) {
+            child.material.vertexColors = true;
+          }
         }
-        child.material.side = THREE.DoubleSide;
-        if (child.geometry.attributes.color) {
-          child.material.vertexColors = true;
-        }
+      });
+
+      scene.add(island);
+
+      // จัดเกาะให้อยู่ตรงกลาง Scene
+      const box = new THREE.Box3().setFromObject(island);
+      const center = box.getCenter(new THREE.Vector3());
+      const size = box.getSize(new THREE.Vector3());
+
+      island.position.sub(center);
+
+      // ปรับระยะกล้องให้มองเห็นเกาะพอดีเฟรม
+      const sphere = new THREE.Sphere();
+      new THREE.Box3().setFromObject(island).getBoundingSphere(sphere);
+
+      if (sphere.radius > 0) {
+        const radius = sphere.radius;
+        const verticalFov = THREE.MathUtils.degToRad(camera.fov);
+        const horizontalFov = 2 * Math.atan(
+          Math.tan(verticalFov / 2) * camera.aspect
+        );
+
+        const limitingFov = Math.min(verticalFov, horizontalFov);
+        const distance = radius / Math.sin(limitingFov / 2);
+
+        camera.position.set(
+          distance * 0.7,
+          distance * 0.55,
+          distance * 1.5
+        );
+
+        camera.lookAt(0, 0, 0);
+        camera.near = Math.max(radius / 1000, 0.01);
+        camera.far = Math.max(radius * 100, 10000);
+        camera.updateProjectionMatrix();
+
+        controls.target.set(0, 0, 0);
+        controls.update();
       }
-    });
 
-    scene.add(island);
-
-    // จัดเกาะให้อยู่ตรงกลาง Scene
-    const box = new THREE.Box3().setFromObject(island);
-    const center = box.getCenter(new THREE.Vector3());
-    const size = box.getSize(new THREE.Vector3());
-
-    island.position.sub(center);
-
-    // ปรับระยะกล้องให้มองเห็นเกาะพอดีเฟรม
-    const sphere = new THREE.Sphere();
-    new THREE.Box3().setFromObject(island).getBoundingSphere(sphere);
-
-    if (sphere.radius > 0) {
-      const radius = sphere.radius;
-      const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-      const horizontalFov = 2 * Math.atan(
-        Math.tan(verticalFov / 2) * camera.aspect
-      );
-
-      const limitingFov = Math.min(verticalFov, horizontalFov);
-      const distance = radius / Math.sin(limitingFov / 2);
-
-      camera.position.set(
-        distance * 0.7,
-        distance * 0.55,
-        distance * 1.5
-      );
-
-      camera.lookAt(0, 0, 0);
-      camera.near = Math.max(radius / 1000, 0.01);
-      camera.far = Math.max(radius * 100, 10000);
-      camera.updateProjectionMatrix();
-
-      controls.target.set(0, 0, 0);
-      controls.update();
+      status.textContent = `โหลดเกาะสำเร็จ | ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)}`;
+      status.style.background = '#111827';
+    },
+    (progress) => {
+      if (progress.total > 0) {
+        status.textContent = `กำลังโหลดเกาะ ${Math.round((progress.loaded / progress.total) * 100)}%`;
+      }
+    },
+    (error) => {
+      if (!isFallback) {
+        // ลองโหลดจากอีกพาธหนึ่งเพื่อความชัวร์
+        loadIsland('/stisland.glb', true);
+      } else {
+        console.error('GLB loading error:', error);
+        status.textContent = `โหลดเกาะไม่สำเร็จ: ${url} (${error.message || error})`;
+        status.style.background = '#dc2626';
+      }
     }
+  );
+}
 
-    status.textContent = `โหลดเกาะสำเร็จ | ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)}`;
-  },
-  (progress) => {
-    if (progress.total > 0) {
-      status.textContent = `กำลังโหลดเกาะ ${Math.round(progress.loaded / progress.total * 100)}%`;
-    }
-  },
-  (error) => {
-    console.error('GLB loading error:', error);
-    status.textContent = `โหลดเกาะไม่สำเร็จ: ${modelURL} (${error.message || error})`;
-    status.style.background = '#dc2626';
-  }
-);
+// เริ่มต้นโหลดเกาะ
+loadIsland('/Models/stisland.glb');
 
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
