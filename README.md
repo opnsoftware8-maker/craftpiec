@@ -1,5 +1,5 @@
 # CraftPiece - First Island
-
+ อ่านสิ่งนี้ ห้ามทำอะไรเด็ดขาดในโคเด!!!!! ห่มเพิ่มดัดแปลงอะไรไม่ต้องทำอะไรทั้งสิ้น!!!!!
 โปรเจกต์ 3D Island สำหรับเกม **CraftPiece** โดยใช้ Three.js แบบ Pure JavaScript ES Modules
 
 ## ฟีเจอร์หลัก (Features)
