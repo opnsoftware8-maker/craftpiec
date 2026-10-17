@@ -1,8 +1,10 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
-import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { createCamera } from './system/camera.js';
+import { Player } from './player.js';
+import { InputController } from './control.js';
 
+// 1. สร้างฉาก 3D และตัวเรนเดอร์ (Optimized: ปิดแสงเงา Shadow Map ทั้งหมด เพื่อความลื่นไหลสูงสุด)
 const scene = new THREE.Scene();
 scene.background = new THREE.Color(0x87ceeb);
 
@@ -11,48 +13,31 @@ const renderer = new THREE.WebGLRenderer({
   powerPreference: 'high-performance'
 });
 
-renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+// ออฟติไมส์ PixelRatio ให้ลื่นไหลบนทุกอุปกรณ์
+renderer.setPixelRatio(Math.min(window.devicePixelRatio, 1.5));
 renderer.setSize(window.innerWidth, window.innerHeight);
 renderer.outputColorSpace = THREE.SRGBColorSpace;
+renderer.shadowMap.enabled = false; // ปิดเงาตามคำขอเพื่อความลื่นไหล
 document.body.appendChild(renderer.domElement);
 
+// 2. กล้องมุมมองซูมสูงไกล สไตล์เกม ARPG (ตามภาพต้นแบบ)
 const camera = createCamera();
+const cameraOffset = new THREE.Vector3(0, 50, 50);
 
-// OrbitControls ให้หมุนดูเกาะรอบทิศทางได้ทั้งบนมือถือและคอมพิวเตอร์
-const controls = new OrbitControls(camera, renderer.domElement);
-controls.enableDamping = true;
-controls.dampingFactor = 0.05;
+// 3. แสงสว่าง (ปรับแสงแบบไม่มีเงา นุ่มนวลและไม่กินทรัพยากร)
+scene.add(new THREE.HemisphereLight(0xffffff, 0x667788, 2.2));
 
-// แสงสว่างรอบทิศและแสงแดดส่องกระทบเกาะ
-scene.add(new THREE.HemisphereLight(0xffffff, 0x555555, 2.5));
-
-const sunlight = new THREE.DirectionalLight(0xffffff, 3.5);
-sunlight.position.set(500, 1000, 500);
+const sunlight = new THREE.DirectionalLight(0xffffff, 2.8);
+sunlight.position.set(200, 400, 150);
+sunlight.castShadow = false;
 scene.add(sunlight);
 
-scene.add(new THREE.AmbientLight(0xffffff, 1.2));
+scene.add(new THREE.AmbientLight(0xffffff, 0.8));
 
-// กล่องแสดงสถานะที่มุมซ้ายบน
-const status = document.createElement('div');
 
-Object.assign(status.style, {
-  position: 'fixed',
-  top: '12px',
-  left: '12px',
-  zIndex: '10',
-  padding: '10px 14px',
-  background: '#111827',
-  color: '#ffffff',
-  borderRadius: '8px',
-  font: '14px sans-serif',
-  maxWidth: '90%',
-  overflowWrap: 'anywhere',
-  boxShadow: '0 4px 10px rgba(0,0,0,0.3)'
-});
 
-status.textContent = 'กำลังโหลดเกาะ...';
-document.body.appendChild(status);
-
+// 5. โหลดเกาะ (stisland.glb) ลดขนาด 2.5 เท่า แปลงวัสดุ Low-poly (Flat Shading)
+let islandModel = null;
 const loader = new GLTFLoader();
 
 function loadIsland(url, isFallback = false) {
@@ -61,90 +46,107 @@ function loadIsland(url, isFallback = false) {
     (gltf) => {
       const island = gltf.scene;
 
-      // คำนวณ Normals ให้โมเดลกรณีไม่มี Normals เพื่อให้รับแสงสว่างและแสดงสีได้สวยงาม
       island.traverse((child) => {
         if (child.isMesh) {
-          if (!child.geometry.attributes.normal) {
+          // แปลง Geometry ให้เป็น Non-Indexed เพื่อโชว์เหลี่ยม Low-poly คมชัด
+          if (child.geometry) {
+            if (child.geometry.index) {
+              child.geometry = child.geometry.toNonIndexed();
+            }
             child.geometry.computeVertexNormals();
           }
-          child.material.side = THREE.DoubleSide;
-          if (child.geometry.attributes.color) {
-            child.material.vertexColors = true;
+
+          // ปรับวัสดุ Flat Shading สไตล์ Low-poly
+          if (child.material) {
+            child.material.flatShading = true;
+            child.material.roughness = 0.88;
+            child.material.metalness = 0.05;
+            child.material.side = THREE.DoubleSide;
+            if (child.geometry.attributes.color) {
+              child.material.vertexColors = true;
+            }
+            child.material.needsUpdate = true;
           }
+
+          child.castShadow = false;
+          child.receiveShadow = false;
         }
       });
 
-      scene.add(island);
+      // ย่อขนาดเกาะ 2.5 เท่า
+      const scaleFactor = 1 / 3.75;
+      island.scale.set(scaleFactor, scaleFactor, scaleFactor);
+      island.updateMatrixWorld(true);
 
-      // จัดเกาะให้อยู่ตรงกลาง Scene
+      // จัดเกาะไว้ตรงกลางจุดเริ่มต้น (0, 0, 0)
       const box = new THREE.Box3().setFromObject(island);
       const center = box.getCenter(new THREE.Vector3());
-      const size = box.getSize(new THREE.Vector3());
-
       island.position.sub(center);
+      island.updateMatrixWorld(true);
 
-      // ปรับระยะกล้องให้มองเห็นเกาะพอดีเฟรม
-      const sphere = new THREE.Sphere();
-      new THREE.Box3().setFromObject(island).getBoundingSphere(sphere);
+      scene.add(island);
+      islandModel = island;
 
-      if (sphere.radius > 0) {
-        const radius = sphere.radius;
-        const verticalFov = THREE.MathUtils.degToRad(camera.fov);
-        const horizontalFov = 2 * Math.atan(
-          Math.tan(verticalFov / 2) * camera.aspect
-        );
-
-        const limitingFov = Math.min(verticalFov, horizontalFov);
-        const distance = radius / Math.sin(limitingFov / 2);
-
-        camera.position.set(
-          distance * 0.7,
-          distance * 0.55,
-          distance * 1.5
-        );
-
-        camera.lookAt(0, 0, 0);
-        camera.near = Math.max(radius / 1000, 0.01);
-        camera.far = Math.max(radius * 100, 10000);
-        camera.updateProjectionMatrix();
-
-        controls.target.set(0, 0, 0);
-        controls.update();
-      }
-
-      status.textContent = `โหลดเกาะสำเร็จ | ${size.x.toFixed(1)} × ${size.y.toFixed(1)} × ${size.z.toFixed(1)}`;
-      status.style.background = '#111827';
-    },
-    (progress) => {
-      if (progress.total > 0) {
-        status.textContent = `กำลังโหลดเกาะ ${Math.round((progress.loaded / progress.total) * 100)}%`;
+      if (player && player.characterGroup) {
+        player.snapToCenter(islandModel);
       }
     },
+    undefined,
     (error) => {
       if (!isFallback) {
-        // ลองโหลดจากอีกพาธหนึ่งเพื่อความชัวร์
         loadIsland('/stisland.glb', true);
       } else {
-        console.error('GLB loading error:', error);
-        status.textContent = `โหลดเกาะไม่สำเร็จ: ${url} (${error.message || error})`;
-        status.style.background = '#dc2626';
+        console.error('Island loading error:', error);
       }
     }
   );
 }
 
-// เริ่มต้นโหลดเกาะ
-loadIsland('/Models/stisland.glb');
+// 6. ตัวละคร (Player) และระบบอินพุต (InputController)
+const player = new Player(scene);
+const inputController = new InputController();
 
+player.load('/playermodel.glb', () => {
+  if (islandModel) {
+    player.snapToCenter(islandModel);
+  }
+});
+
+// เริ่มโหลดเกาะ
+loadIsland('/stisland.glb');
+
+// 7. จัดการ Resize หน้าจอ
 window.addEventListener('resize', () => {
   camera.aspect = window.innerWidth / window.innerHeight;
   camera.updateProjectionMatrix();
   renderer.setSize(window.innerWidth, window.innerHeight);
 });
 
+// 8. Animation & Game Loop
+const clock = new THREE.Clock();
+
 function animate() {
   requestAnimationFrame(animate);
-  controls.update();
+
+  const delta = Math.min(clock.getDelta(), 0.05);
+  const input = inputController.getInput();
+
+  // อัปเดตตัวละคร (เดิน, แดช, กระโดดต่อเนื่อง, กระโดดซ้ำบนอากาศ, ฟื้น Stamina)
+  player.update(delta, input, islandModel);
+
+  // กล้องซูมสูงไกล ล็อคติดตามตัวละคร
+  if (player.characterGroup) {
+    camera.position.x = player.position.x + cameraOffset.x;
+    camera.position.y = player.position.y + cameraOffset.y;
+    camera.position.z = player.position.z + cameraOffset.z;
+
+    camera.lookAt(
+      player.position.x,
+      player.position.y + 0.5,
+      player.position.z - 4.0
+    );
+  }
+
   renderer.render(scene, camera);
 }
 

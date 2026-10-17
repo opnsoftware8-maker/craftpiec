@@ -1,20 +1,26 @@
 # CraftPiece - First Island
 
-โปรเจกต์ 3D Island สำหรับเกม **CraftPiece** โดยใช้ Three.js แบบ Pure JavaScript ES Modules (ไม่มี React, ไม่มี Next.js)
+โปรเจกต์ 3D Island สำหรับเกม **CraftPiece** โดยใช้ Three.js แบบ Pure JavaScript ES Modules
 
-## สาเหตุที่หน้าจอขาวบน Vercel และวิธีแก้ (Root Cause Analysis & Fix)
+## ฟีเจอร์หลัก (Features)
 
-1. **ปัญหา Failed to resolve module specifier "three"**:
-   - ในไฟล์ `GLTFLoader.js` ของ Three.js มีการเขียน `import ... from 'three';`
-   - เมื่อโหลดผ่านเบราว์เซอร์หรือ Vercel โดยไม่มี Import Map เบราว์เซอร์จะหยุดทำงานทันทีพร้อม Error: `Uncaught TypeError: Failed to resolve module specifier "three"` ส่งผลให้หน้าจอขาวสนิท
-   - **การแก้ไข**: เพิ่ม `<script type="importmap">` ใน `index.html` เพื่อจับคู่ `three` และ `three/addons/` ทำให้เบราว์เซอร์ดึง Three.js และ GLTFLoader ได้โดยตรงและสมบูรณ์ 100%
+1. **ระบบอาวุธและดาบเริ่มต้น Blackblade (`src/combat/sword.js`)**:
+   - จัดเก็บโมเดลดาบไว้ในโฟลเดอร์ระเบียบ `Models/sword/blackblade.glb`
+   - มีระบบ `SwordManager` จัดเก็บข้อมูลสถานะดาบ: ชื่อ, ประเภท (Greatsword), ความเสียหาย, สเกล, และตำแหน่งจับ
+   - **ติดตั้งดาบลงบนมือขวา (`hand.R`)**: เมื่อเริ่มเกมตัวละครจะถือดาบ Blackblade ในมือขวาโดยอัตโนมัติ และแกว่งตามการเคลื่อนไหวของกระดูกมือ
+   - **ช่องเลือกดาบตรงกลางล่างของหน้าจอ (Hotbar Slot 1)**:
+     - แสดง `[ 1 ] ⚔️ Blackblade`
+     - แสดงสถานะการถือดาบ และสามารถกดปุ่ม **`1`** บนคีย์บอร์ด หรือคลิกที่ช่องเพื่อสลับการถือ/เก็บดาบได้
 
-2. **ปัญหา Normals ในไฟล์ stisland.glb**:
-   - โมเดล `stisland.glb` ไม่มี Attribute `NORMAL` จากโปรแกรมต้นทาง ทำให้แสงส่องไม่ติดและโมเดลอาจมืดดำ
-   - **การแก้ไข**: เพิ่ม `child.geometry.computeVertexNormals()` และเปิด `DoubleSide` ใน `src/main.js` เพื่อให้โมเดลเกาะสะท้อนแสงแดดและแสดงสี Vertex Color (สีเขียวธรรมชาติ) อย่างชัดเจน
+2. **ระบบการเคลื่อนไหว & ต่อสู้ (Movement & Combat Mechanics)**:
+   - **กระโดดต่อเนื่อง & กระโดดซ้ำในอากาศ 3 ชั้น**: กระโดดปกติ (-10 Stamina) และกระโดดซ้ำในอากาศ (-20 Stamina)
+   - **ระบบแดช Blox Fruits**: กด **Q** หรือปุ่ม **แดช** บนมือถือ พุ่งตัวไปข้างหน้าพร้อมเอียงโครงร่าง (-5 Stamina, คูลดาวน์ 0.25 วิ)
+   - **หลอด HP และ Stamina**: เริ่มต้นที่ 100/100 พร้อมระบบฟื้นฟู Stamina ไหลๆ 10% ต่อวินาที
 
-3. **ปัญหาตรวจไม่พบ Error บนมือถือ**:
-   - เพิ่ม Error Listener ใน `index.html` เพื่อแสดงข้อความ Error สีแดงบนหน้าจอทันทีหากมีปัญหาเกิดขึ้น
+3. **มุมกล้อง ARPG และการออฟติไมส์**:
+   - กล้องซูมสูงไกล สไตล์เกม ARPG ล็อคติดตามตัวละคร
+   - ปิดระบบเงา (Shadow Map) เพื่อความลื่นไหลสูงสุด 60 FPS+
+   - เกาะสไตล์ Low-poly (Flat Shading)
 
 ## โครงสร้างไฟล์ (File Structure)
 
@@ -22,10 +28,17 @@
 .
 ├── index.html              # ไฟล์ HTML หลักพร้อม importmap และ Error Listener
 ├── Models/
-│   └── stisland.glb        # ไฟล์โมเดล 3D เกาะ
+│   ├── stisland.glb        # โมเดลเกาะ 3D (Tinkercad Low-poly)
+│   ├── playermodel.glb     # โมเดลตัวละคร 3D พร้อมอนิเมชั่น
+│   └── sword/
+│       └── blackblade.glb  # โมเดลดาบดำ Blackblade 3D
 ├── src/
-│   ├── main.js             # โค้ดเรนเดอร์ Three.js และโหลดโมเดลเกาะ
+│   ├── main.js             # ควบคุมฉาก แสง กล้อง ARPG และ Game Loop
+│   ├── player.js           # จัดการตัวละคร, HP, Stamina, สวมใส่ดาบ Blackblade
+│   ├── control.js          # ระบบ Multi-touch จอยสติ๊ก, ปุ่มแดช (Q), ปุ่มกระโดด (Space)
+│   ├── combat/
+│       └── sword.js        # ข้อมูลสเปกดาบ, ตัวโหลด และระบบติดตั้งดาบเข้ามือตัวละคร
 │   └── system/
-│       └── camera.js       # ฟังก์ชันสร้าง PerspectiveCamera
-└── package.json            # การตั้งค่ารัน Vite
+│       └── camera.js       # ตั้งค่ากล้อง PerspectiveCamera ซูมสูงไกล
+└── package.json            # การตั้งค่า Vite
 ```
