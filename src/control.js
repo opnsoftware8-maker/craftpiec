@@ -8,11 +8,9 @@ export class InputController {
       backward: false,
       left: false,
       right: false,
-      jump: false,
       dash: false
     };
 
-    this.jumpJustPressed = false;
     this.dashJustPressed = false;
 
     this.joystick = {
@@ -24,10 +22,8 @@ export class InputController {
     };
 
     this.joystickTouchId = null;
-    this.jumpTouchId = null;
     this.dashTouchId = null;
 
-    this.jumpPressed = false;
     this.dashPressed = false;
 
     this.initKeyboard();
@@ -54,10 +50,6 @@ export class InputController {
         case 'KeyD':
         case 'ArrowRight':
           this.keys.right = true;
-          break;
-        case 'Space':
-          this.keys.jump = true;
-          this.jumpJustPressed = true;
           break;
         case 'KeyQ':
         case 'ShiftLeft':
@@ -86,9 +78,6 @@ export class InputController {
         case 'ArrowRight':
           this.keys.right = false;
           break;
-        case 'Space':
-          this.keys.jump = false;
-          break;
         case 'KeyQ':
         case 'ShiftLeft':
         case 'ShiftRight':
@@ -98,7 +87,7 @@ export class InputController {
     });
   }
 
-  // สร้าง UI จอยสติ๊ก, ปุ่มกระโดด, และปุ่มแดช ที่ตอบสนองต่อการสัมผัสบนมือถือทันที
+  // สร้าง UI จอยสติ๊ก และปุ่มแดช ที่ตอบสนองต่อการสัมผัสบนมือถือทันที
   createTouchUI() {
     const touchContainer = document.createElement('div');
     touchContainer.id = 'touch-controls-container';
@@ -244,16 +233,16 @@ export class InputController {
       }
     });
 
-    // 2. Action Buttons Group (มุมขวาล่าง: แดช + กระโดด)
+    // 2. Action Buttons Group (มุมขวาล่าง: แดช)
     // 2.1 ปุ่มแดช (Dash Button)
     const dashBtn = document.createElement('div');
     dashBtn.id = 'mobile-dash-button';
     Object.assign(dashBtn.style, {
       position: 'absolute',
-      bottom: '108px',
+      bottom: '24px',
       right: '24px',
-      width: '60px',
-      height: '60px',
+      width: '66px',
+      height: '66px',
       borderRadius: '50%',
       background: 'linear-gradient(135deg, #0ea5e9 0%, #0284c7 100%)',
       border: '2.5px solid rgba(255, 255, 255, 0.9)',
@@ -262,7 +251,7 @@ export class InputController {
       flexDirection: 'column',
       alignItems: 'center',
       justifyContent: 'center',
-      fontSize: '13px',
+      fontSize: '14px',
       fontWeight: 'bold',
       boxShadow: '0 4px 14px rgba(0,0,0,0.5)',
       pointerEvents: 'auto',
@@ -311,75 +300,8 @@ export class InputController {
       dashBtn.style.transform = 'scale(1)';
     });
 
-    // 2.2 ปุ่มกระโดด (Jump Button)
-    const jumpBtn = document.createElement('div');
-    jumpBtn.id = 'mobile-jump-button';
-    Object.assign(jumpBtn.style, {
-      position: 'absolute',
-      bottom: '24px',
-      right: '20px',
-      width: '74px',
-      height: '74px',
-      borderRadius: '50%',
-      background: 'linear-gradient(135deg, #f97316 0%, #ea580c 100%)',
-      border: '3px solid rgba(255, 255, 255, 0.9)',
-      color: '#ffffff',
-      display: 'flex',
-      flexDirection: 'column',
-      alignItems: 'center',
-      justifyContent: 'center',
-      fontSize: '14px',
-      fontWeight: 'bold',
-      boxShadow: '0 4px 16px rgba(0,0,0,0.5)',
-      pointerEvents: 'auto',
-      touchAction: 'none',
-      cursor: 'pointer',
-      zIndex: '110',
-      transition: 'transform 0.06s ease, filter 0.06s ease'
-    });
-    jumpBtn.innerHTML = '<span>กระโดด</span><span style="font-size:9px;opacity:0.85;">(Space)</span>';
-
-    // Touch Event สำหรับปุ่มกระโดด
-    jumpBtn.addEventListener('touchstart', (e) => {
-      e.preventDefault();
-      e.stopPropagation();
-      const touch = e.changedTouches[0];
-      this.jumpTouchId = touch.identifier;
-      this.jumpPressed = true;
-      this.jumpJustPressed = true;
-      jumpBtn.style.transform = 'scale(0.88)';
-      jumpBtn.style.filter = 'brightness(1.25)';
-    }, { passive: false });
-
-    const handleJumpTouchEnd = (e) => {
-      for (let i = 0; i < e.changedTouches.length; i++) {
-        if (e.changedTouches[i].identifier === this.jumpTouchId) {
-          e.preventDefault();
-          this.jumpPressed = false;
-          this.jumpTouchId = null;
-          jumpBtn.style.transform = 'scale(1)';
-          jumpBtn.style.filter = 'none';
-          break;
-        }
-      }
-    };
-    window.addEventListener('touchend', handleJumpTouchEnd, { passive: false });
-    window.addEventListener('touchcancel', handleJumpTouchEnd, { passive: false });
-
-    jumpBtn.addEventListener('mousedown', (e) => {
-      e.preventDefault();
-      this.jumpPressed = true;
-      this.jumpJustPressed = true;
-      jumpBtn.style.transform = 'scale(0.88)';
-    });
-    window.addEventListener('mouseup', () => {
-      this.jumpPressed = false;
-      jumpBtn.style.transform = 'scale(1)';
-    });
-
     touchContainer.appendChild(joyZone);
     touchContainer.appendChild(dashBtn);
-    touchContainer.appendChild(jumpBtn);
     document.body.appendChild(touchContainer);
   }
 
@@ -406,10 +328,6 @@ export class InputController {
 
     const isMoving = length > 0.12;
 
-    const jumpHeld = this.keys.jump || this.jumpPressed;
-    const jumpJustPressed = this.jumpJustPressed;
-    this.jumpJustPressed = false;
-
     const dashJustPressed = this.dashJustPressed;
     this.dashJustPressed = false;
 
@@ -417,8 +335,6 @@ export class InputController {
       x,
       z,
       isMoving,
-      jumpHeld,
-      jumpJustPressed,
       dashJustPressed
     };
   }

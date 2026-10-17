@@ -2,6 +2,28 @@
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 
+// Precomputed target quaternions for dynamic aerodynamic dash pose
+const Q_SPINE_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (28 * Math.PI) / 180);
+const Q_CHEST_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (10 * Math.PI) / 180);
+const Q_HEAD_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (-14 * Math.PI) / 180);
+
+const Q_REST_UPPER_ARM_L = new THREE.Quaternion(9.74745e-9, 9.32834e-8, -0.382683, 0.92388);
+const Q_REST_UPPER_ARM_R = new THREE.Quaternion(9.74745e-9, -9.32834e-8, 0.382683, 0.92388);
+// Upper arms sweep 55° backward and down relative to torso, flaring slightly outward for clean aerodynamics
+const Q_UPPER_ARM_L_DASH = Q_REST_UPPER_ARM_L.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.58, 0, 0.20, 'YXZ')));
+const Q_UPPER_ARM_R_DASH = Q_REST_UPPER_ARM_R.clone().multiply(new THREE.Quaternion().setFromEuler(new THREE.Euler(-0.58, 0, -0.20, 'YXZ')));
+const Q_LOWER_ARM_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.20);
+
+const Q_REST_LEG = new THREE.Quaternion(4.37114e-8, 0, -1, 0);
+
+// Left leg: forward stride (+35°) + natural knee stride flexion
+const Q_UPPER_LEG_L_DASH = Q_REST_LEG.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), (35 * Math.PI) / 180));
+const Q_LOWER_LEG_L_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.65);
+
+// Right leg: backward stride (-55°) + trailing knee flexion (-49°)
+const Q_UPPER_LEG_R_DASH = Q_REST_LEG.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.95));
+const Q_LOWER_LEG_R_DASH = new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(1, 0, 0), -0.85);
+
 export class Player {
   constructor(scene) {
     this.scene = scene;
@@ -23,44 +45,61 @@ export class Player {
     this.isGrounded = true;
 
     this.moveSpeed = 8.5;
-    this.jumpForce = 13.0;
     this.gravity = -34.0;
-
-    this.maxAirJumps = 10;
-    this.airJumpsLeft = 10;
 
     this.isDashing = false;
     this.dashSpeed = 28.0;
-    this.dashDuration = 0.16;
+    this.dashDuration = 0.26;
     this.dashTimer = 0;
-    this.dashCooldown = 0.25;
+    this.dashCooldown = 0.05;
     this.dashCooldownTimer = 0;
     this.dashDirection = new THREE.Vector3(0, 0, -1);
-    this.bodyLeanAngle = 0;
+    this.dashPoseWeight = 0;
 
+    // การอ้างอิงกระดูกทุกข้อต่อสำหรับท่าแดชที่พริ้วไหว
+    this.boneHips = null;
+    this.boneSpine = null;
+    this.boneChest = null;
+    this.boneNeck = null;
+    this.boneHead = null;
+    this.boneUpperArmR = null;
+    this.boneLowerArmR = null;
+    this.boneUpperArmL = null;
+    this.boneLowerArmL = null;
+    this.boneUpperLegL = null;
+    this.boneLowerLegL = null;
+    this.boneUpperLegR = null;
+    this.boneLowerLegR = null;
+    this.boneHandR = null;
 
     this.raycaster = new THREE.Raycaster();
     this.downVector = new THREE.Vector3(0, -1, 0);
+    this.rayOrigin = new THREE.Vector3();
 
     this.createStatusHUD();
   }
 
   createStatusHUD() {
+    const existingHud = document.getElementById('player-hud');
+    if (existingHud) existingHud.remove();
+    const existingVignette = document.getElementById('player-hurt-vignette');
+    if (existingVignette) existingVignette.remove();
+
     const hud = document.createElement('div');
     hud.id = 'player-hud';
     Object.assign(hud.style, {
       position: 'fixed',
-      top: '12px',
-      left: '12px',
+      top: '16px',
+      left: '16px',
       zIndex: '60',
       display: 'flex',
       flexDirection: 'column',
       gap: '8px',
       padding: '12px 16px',
       background: 'rgba(15, 23, 42, 0.85)',
-      borderRadius: '12px',
+      borderRadius: '8px',
       border: '1px solid rgba(255, 255, 255, 0.15)',
-      boxShadow: '0 6px 20px rgba(0, 0, 0, 0.5)',
+      boxShadow: '0 4px 16px rgba(0, 0, 0, 0.5)',
       color: '#ffffff',
       fontFamily: 'ui-sans-serif, system-ui, sans-serif',
       minWidth: '220px',
@@ -68,51 +107,41 @@ export class Player {
       pointerEvents: 'none'
     });
 
-    const hpWrapper = document.createElement('div');
-    hpWrapper.innerHTML = `
-      <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:3px;">
-        <span style="color:#ef4444;">HP</span>
-        <span id="hud-hp-text">100 / 100</span>
+    hud.innerHTML = `
+      <div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin-bottom: 3px;">
+          <span style="color: #ef4444;">HP</span>
+          <span id="hud-hp-text">1000 / 1000</span>
+        </div>
+        <div style="width: 100%; height: 12px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; overflow: hidden;">
+          <div id="hud-hp-bar" style="width: 100%; height: 100%; background: #ef4444; border-radius: 6px; transition: width 0.1s linear;"></div>
+        </div>
       </div>
-      <div style="width:100%; height:12px; background:rgba(255,255,255,0.1); border-radius:6px; overflow:hidden;">
-        <div id="hud-hp-bar" style="width:100%; height:100%; background:linear-gradient(90deg, #dc2626, #ef4444); border-radius:6px; transition:width 0.1s linear;"></div>
+
+      <div>
+        <div style="display: flex; justify-content: space-between; font-size: 12px; font-weight: 700; margin-bottom: 3px;">
+          <span style="color: #0ea5e9;">STAMINA</span>
+          <span id="hud-stamina-text">1000 / 1000</span>
+        </div>
+        <div style="width: 100%; height: 12px; background: rgba(255, 255, 255, 0.1); border-radius: 6px; overflow: hidden;">
+          <div id="hud-stamina-bar" style="width: 100%; height: 100%; background: #0ea5e9; border-radius: 6px; transition: width 0.05s linear;"></div>
+        </div>
       </div>
     `;
 
-    const staminaWrapper = document.createElement('div');
-    staminaWrapper.innerHTML = `
-      <div style="display:flex; justify-content:space-between; font-size:12px; font-weight:700; margin-bottom:3px;">
-        <span style="color:#0ea5e9;">STAMINA</span>
-        <span id="hud-stamina-text">100 / 100</span>
-      </div>
-      <div style="width:100%; height:12px; background:rgba(255,255,255,0.1); border-radius:6px; overflow:hidden;">
-        <div id="hud-stamina-bar" style="width:100%; height:100%; background:linear-gradient(90deg, #0284c7, #38bdf8); border-radius:6px; transition:width 0.05s linear;"></div>
-      </div>
-    `;
-
-    const airJumpIndicator = document.createElement('div');
-    airJumpIndicator.id = 'hud-airjump-info';
-    airJumpIndicator.style.fontSize = '11px';
-    airJumpIndicator.style.color = '#cbd5e1';
-    airJumpIndicator.style.marginTop = '2px';
-    airJumpIndicator.innerHTML = 'กระโดดอากาศ: <b style="color:#38bdf8;">3/10</b> • แดช: <b>พร้อม</b>';
-
-    hud.appendChild(hpWrapper);
-    hud.appendChild(staminaWrapper);
-    hud.appendChild(airJumpIndicator);
     document.body.appendChild(hud);
 
     this.hudElements = {
       hpText: document.getElementById('hud-hp-text'),
       hpBar: document.getElementById('hud-hp-bar'),
       staminaText: document.getElementById('hud-stamina-text'),
-      staminaBar: document.getElementById('hud-stamina-bar'),
-      airJumpInfo: document.getElementById('hud-airjump-info')
+      staminaBar: document.getElementById('hud-stamina-bar')
     };
   }
 
   updateHUD() {
     if (!this.hudElements) return;
+
     const hpPercent = Math.max(0, Math.min(100, (this.hp / this.maxHp) * 100));
     const staPercent = Math.max(0, Math.min(100, (this.stamina / this.maxStamina) * 100));
 
@@ -121,12 +150,6 @@ export class Player {
 
     this.hudElements.staminaText.textContent = `${Math.round(this.stamina)} / ${this.maxStamina}`;
     this.hudElements.staminaBar.style.width = `${staPercent}%`;
-
-    const dashStatus = this.dashCooldownTimer <= 0 && !this.isDashing
-      ? '<b style="color:#22c55e;">พร้อม (-5)</b>'
-      : `<b style="color:#f59e0b;">${this.dashCooldownTimer.toFixed(2)}s</b>`;
-
-    this.hudElements.airJumpInfo.innerHTML = `กระโดดอากาศ: <b style="color:#38bdf8;">${this.airJumpsLeft}/10</b> (-20) • แดช: ${dashStatus}`;
   }
 
   snapToCenter(islandMesh) {
@@ -144,6 +167,24 @@ export class Player {
     this.position.copy(this.characterGroup.position);
   }
 
+  getRightHandBone() {
+    if (this.boneHandR) return this.boneHandR;
+    if (this.characterGroup) {
+      let found = null;
+      this.characterGroup.traverse((child) => {
+        if (!found && child.isBone) {
+          const cName = child.name ? child.name.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+          if (cName === 'handr' || child.name === 'hand.R') {
+            found = child;
+          }
+        }
+      });
+      if (found) this.boneHandR = found;
+      return found;
+    }
+    return null;
+  }
+
   load(url, onLoaded, isFallback = false) {
     const loader = new GLTFLoader();
 
@@ -155,20 +196,41 @@ export class Player {
         this.characterGroup = new THREE.Group();
         this.characterGroup.add(this.mesh);
 
+        this.boneHips = null;
+        this.boneSpine = null;
+        this.boneChest = null;
+        this.boneNeck = null;
+        this.boneHead = null;
         this.boneUpperArmR = null;
+        this.boneLowerArmR = null;
         this.boneUpperArmL = null;
-        this.boneUpperLegR = null;
+        this.boneLowerArmL = null;
         this.boneUpperLegL = null;
+        this.boneLowerLegL = null;
+        this.boneUpperLegR = null;
+        this.boneLowerLegR = null;
+        this.boneHandR = null;
 
         this.characterGroup.traverse((child) => {
           if (child.isMesh) {
             child.castShadow = false;
             child.receiveShadow = false;
           }
-          if (child.name === 'upperArm.R') this.boneUpperArmR = child;
-          if (child.name === 'upperArm.L') this.boneUpperArmL = child;
-          if (child.name === 'upperLeg.R') this.boneUpperLegR = child;
-          if (child.name === 'upperLeg.L') this.boneUpperLegL = child;
+          const clean = child.name ? child.name.toLowerCase().replace(/[^a-z0-9]/g, '') : '';
+          if (clean === 'hips') this.boneHips = child;
+          if (clean === 'spine') this.boneSpine = child;
+          if (clean === 'chest') this.boneChest = child;
+          if (clean === 'neck') this.boneNeck = child;
+          if (clean === 'head') this.boneHead = child;
+          if (clean === 'upperarmr') this.boneUpperArmR = child;
+          if (clean === 'lowerarmr') this.boneLowerArmR = child;
+          if (clean === 'upperarml') this.boneUpperArmL = child;
+          if (clean === 'lowerarml') this.boneLowerArmL = child;
+          if (clean === 'upperlegl') this.boneUpperLegL = child;
+          if (clean === 'lowerlegl') this.boneLowerLegL = child;
+          if (clean === 'upperlegr') this.boneUpperLegR = child;
+          if (clean === 'lowerlegr') this.boneLowerLegR = child;
+          if (clean === 'handr') this.boneHandR = child;
         });
 
         this.characterGroup.position.set(0, 5, 0);
@@ -178,10 +240,6 @@ export class Player {
 
         gltf.animations.forEach((clip) => {
           const action = this.mixer.clipAction(clip);
-          if (clip.name === 'jump') {
-            action.setLoop(THREE.LoopOnce, 1);
-            action.clampWhenFinished = true;
-          }
           this.actions[clip.name] = action;
         });
 
@@ -237,27 +295,6 @@ export class Player {
     }
   }
 
-  performJump(isGroundJump) {
-    if (isGroundJump) {
-      if (this.stamina < 10) return false;
-      this.stamina -= 10;
-      this.velocity.y = this.jumpForce;
-      this.isGrounded = false;
-      if (this.actions['jump']) {
-        this.fadeToAction('jump', 0.08);
-      }
-      return true;
-    } else {
-      if (this.airJumpsLeft <= 0 || this.stamina < 20) return false;
-      this.stamina -= 20;
-      this.airJumpsLeft--;
-      this.velocity.y = this.jumpForce * 0.95;
-      if (this.actions['jump']) {
-        this.actions['jump'].reset().play();
-      }
-      return true;
-    }
-  }
 
   update(delta, input, islandMesh) {
     if (!this.characterGroup || !this.mesh) return;
@@ -280,14 +317,11 @@ export class Player {
       this.velocity.x = this.dashDirection.x * this.dashSpeed;
       this.velocity.z = this.dashDirection.z * this.dashSpeed;
 
-      this.bodyLeanAngle = THREE.MathUtils.lerp(this.bodyLeanAngle, 0.45, 20 * delta);
-
       if (this.dashTimer <= 0) {
         this.isDashing = false;
         this.dashCooldownTimer = this.dashCooldown;
       }
     } else {
-      this.bodyLeanAngle = THREE.MathUtils.lerp(this.bodyLeanAngle, 0, 16 * delta);
 
       if (input.isMoving) {
         this.velocity.x = input.x * this.moveSpeed;
@@ -313,11 +347,9 @@ export class Player {
     this.characterGroup.rotation.y += diff * Math.min(1.0, 18.0 * delta);
 
 
-    if (!this.isGrounded && input.jumpJustPressed) {
-      this.performJump(false);
-    } else if (this.isGrounded && (input.jumpHeld || input.jumpJustPressed)) {
-      this.performJump(true);
-    }
+    const oldX = this.characterGroup.position.x;
+    const oldZ = this.characterGroup.position.z;
+    const oldY = this.characterGroup.position.y;
 
     this.velocity.y += this.gravity * delta;
 
@@ -326,19 +358,24 @@ export class Player {
     this.characterGroup.position.y += this.velocity.y * delta;
 
     if (islandMesh) {
-      const rayOrigin = new THREE.Vector3(
+      this.rayOrigin.set(
         this.characterGroup.position.x,
-        this.characterGroup.position.y + 2.5,
+        oldY + 2.5,
         this.characterGroup.position.z
       );
-      this.raycaster.set(rayOrigin, this.downVector);
+      this.raycaster.set(this.rayOrigin, this.downVector);
 
       const intersects = this.raycaster.intersectObject(islandMesh, true);
 
       if (intersects.length > 0) {
         const groundHeight = intersects[0].point.y;
 
-        if (this.characterGroup.position.y <= groundHeight) {
+        // ถ้าเดินไปข้างหน้าแล้วพื้นข้างหน้าสูงกว่าจุดเดิม (ชนสิ่งกีดขวาง/เนินสูง) จะไม่เด้งขึ้นไป ให้หยุดที่ตำแหน่งเดิม
+        if (this.isGrounded && groundHeight > oldY + 0.35) {
+          this.characterGroup.position.x = oldX;
+          this.characterGroup.position.z = oldZ;
+          this.characterGroup.position.y = oldY;
+        } else if (this.characterGroup.position.y <= groundHeight) {
           this.characterGroup.position.y = groundHeight;
           if (this.velocity.y < 0) {
             this.velocity.y = 0;
@@ -346,44 +383,86 @@ export class Player {
 
           if (!this.isGrounded) {
             this.isGrounded = true;
-            this.airJumpsLeft = this.maxAirJumps;
-
-            if (input.jumpHeld || input.jumpJustPressed) {
-              this.performJump(true);
-            } else {
-              this.fadeToAction(input.isMoving ? 'walk' : 'idle', 0.1);
-            }
+            this.fadeToAction(input.isMoving ? 'walk' : 'idle', 0.1);
           }
         } else {
           this.isGrounded = false;
         }
       } else {
+        // ตกออกจากเกาะ รีเซ็ตตำแหน่งกลับสู่เกาะอย่างปลอดภัย
         if (this.characterGroup.position.y < -25) {
           this.characterGroup.position.set(0, 10, 0);
           this.velocity.set(0, 0, 0);
-          this.hp = Math.max(10, this.hp - 15);
         }
       }
     }
 
 this.position.copy(this.characterGroup.position);
 
-  if (this.mixer) {
-      if (this.activeAction) {
-          this.activeAction.setEffectiveWeight(this.isDashing ? 0 : 1);
-            }
-              this.mixer.update(delta);
-              }
+    if (this.mixer) {
+      this.mixer.update(delta);
+    }
 
-              const targetArmRotX      = this.isDashing ? -Math.PI * 0.25 : 0;
-              const targetRightLegRotX = this.isDashing ? (55 * Math.PI / 180) : 0;
-              const targetLeftLegRotX  = this.isDashing ? -Math.PI * 0.25 : 0;
+    // คำนวณน้ำหนักการแสดงผลท่าทางแดช (Dash Pose Weight) ให้เข้าและออกอย่างนุ่มนวล
+    this.dashPoseWeight = THREE.MathUtils.lerp(
+      this.dashPoseWeight || 0,
+      this.isDashing ? 1.0 : 0.0,
+      Math.min(1.0, (this.isDashing ? 32.0 : 16.0) * delta)
+    );
 
-              const boneLerpSpeed = Math.min(1, 18 * delta);
-              if (this.boneUpperArmR) this.boneUpperArmR.rotation.x = THREE.MathUtils.lerp(this.boneUpperArmR.rotation.x, targetArmRotX,      boneLerpSpeed);
-              if (this.boneUpperArmL) this.boneUpperArmL.rotation.x = THREE.MathUtils.lerp(this.boneUpperArmL.rotation.x, targetArmRotX,      boneLerpSpeed);
-              if (this.boneUpperLegR) this.boneUpperLegR.rotation.x = THREE.MathUtils.lerp(this.boneUpperLegR.rotation.x, targetRightLegRotX, boneLerpSpeed);
-              if (this.boneUpperLegL) this.boneUpperLegL.rotation.x = THREE.MathUtils.lerp(this.boneUpperLegL.rotation.x, targetLeftLegRotX,  boneLerpSpeed);
+    if (this.dashPoseWeight > 0.001) {
+      const w = this.dashPoseWeight;
+
+      // ปรับสะโพกให้ย่อตัวลงแบบนักวิ่งลมกรด เพิ่มความปราดเปรียว
+      if (this.boneHips) {
+        this.boneHips.position.y = 0.90 - 0.07 * w;
+      }
+
+      // 1. ลำตัวและอกเอนไปข้างหน้าแบบพริ้วไหว
+      if (this.boneSpine) {
+        this.boneSpine.quaternion.slerp(Q_SPINE_DASH, w);
+      }
+      if (this.boneChest) {
+        this.boneChest.quaternion.slerp(Q_CHEST_DASH, w);
+      }
+      // หัวมองมุ่งมั่นไปข้างหน้าตามทิศทางพุ่งทะยาน (ไม่แข็งทื่อติดกับอก)
+      if (this.boneHead) {
+        this.boneHead.quaternion.slerp(Q_HEAD_DASH, w);
+      }
+
+      // 2. แขนสองข้างเอียงไปข้างหลังลง 55° นับอิงจากลำตัว พร้อมข้อศอกพริ้วเป็นธรรมชาติ
+      if (this.boneUpperArmL) {
+        this.boneUpperArmL.quaternion.slerp(Q_UPPER_ARM_L_DASH, w);
+      }
+      if (this.boneLowerArmL) {
+        this.boneLowerArmL.quaternion.slerp(Q_LOWER_ARM_DASH, w);
+      }
+      if (this.boneUpperArmR) {
+        this.boneUpperArmR.quaternion.slerp(Q_UPPER_ARM_R_DASH, w);
+      }
+      if (this.boneLowerArmR) {
+        this.boneLowerArmR.quaternion.slerp(Q_LOWER_ARM_DASH, w);
+      }
+
+      // 3. ขาข้างซ้ายเอียงไปข้างหน้าเล็กน้อย พร้อมข้อเข่างอรับจังหวะก้าวทะยาน
+      if (this.boneUpperLegL) {
+        this.boneUpperLegL.quaternion.slerp(Q_UPPER_LEG_L_DASH, w);
+      }
+      if (this.boneLowerLegL) {
+        this.boneLowerLegL.quaternion.slerp(Q_LOWER_LEG_L_DASH, w);
+      }
+
+      // 4. ขาข้างขวาเอียงไปข้างหลังมากกว่าข้างซ้าย พร้อมข้อเข่าเหยียดส่งแรงไปด้านหลัง
+      if (this.boneUpperLegR) {
+        this.boneUpperLegR.quaternion.slerp(Q_UPPER_LEG_R_DASH, w);
+      }
+      if (this.boneLowerLegR) {
+        this.boneLowerLegR.quaternion.slerp(Q_LOWER_LEG_R_DASH, w);
+      }
+    } else if (this.boneHips && this.boneHips.position.y !== 0.90) {
+      this.boneHips.position.y = 0.90;
+    }
+
+    this.updateHUD();
   }
-  
 }

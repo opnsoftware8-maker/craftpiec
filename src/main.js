@@ -3,6 +3,7 @@ import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { createCamera } from './system/camera.js';
 import { Player } from './player.js';
 import { InputController } from './control.js';
+import { SwordManager } from './combat/sword.js';
 
 // 1. สร้างฉาก 3D และตัวเรนเดอร์ (Optimized: ปิดแสงเงา Shadow Map ทั้งหมด เพื่อความลื่นไหลสูงสุด)
 const scene = new THREE.Scene();
@@ -102,14 +103,16 @@ function loadIsland(url, isFallback = false) {
   );
 }
 
-// 6. ตัวละคร (Player) และระบบอินพุต (InputController)
+// 6. ตัวละคร (Player), ดาบ (SwordManager) และระบบอินพุต (InputController)
 const player = new Player(scene);
 const inputController = new InputController();
+const swordManager = new SwordManager(player, scene);
 
 player.load('/playermodel.glb', () => {
   if (islandModel) {
     player.snapToCenter(islandModel);
   }
+  swordManager.attachToHand();
 });
 
 // เริ่มโหลดเกาะ
@@ -131,7 +134,7 @@ function animate() {
   const delta = Math.min(clock.getDelta(), 0.05);
   const input = inputController.getInput();
 
-  // อัปเดตตัวละคร (เดิน, แดช, กระโดดต่อเนื่อง, กระโดดซ้ำบนอากาศ, ฟื้น Stamina)
+  // อัปเดตตัวละคร (เดิน, แดช, ฟื้น Stamina)
   player.update(delta, input, islandModel);
 
   // กล้องซูมสูงไกล ล็อคติดตามตัวละคร
