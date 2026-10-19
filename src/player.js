@@ -72,9 +72,33 @@ export class Player {
     this.boneLowerLegR = null;
     this.boneHandR = null;
 
+    this.characterHeight = 2.85;
+    // ความสูงสูงสุดของสิ่งกีดขวางที่ยอมให้ "ข้าม" ได้ = 40% ของความสูงตัวละคร
+    this.stepHeightRatio = 0.4;
+    this.stepHeight = this.characterHeight * this.stepHeightRatio;
+    this.characterRadius = 0.45;
+
     this.raycaster = new THREE.Raycaster();
     this.downVector = new THREE.Vector3(0, -1, 0);
+    this.upVector = new THREE.Vector3(0, 1, 0);
+    this.forwardVector = new THREE.Vector3();
     this.rayOrigin = new THREE.Vector3();
+    this.probeOrigin = new THREE.Vector3();
+    this.stepCheckOrigin = new THREE.Vector3();
+    this.headCheckOrigin = new THREE.Vector3();
+    this.vaultDirection = new THREE.Vector3();
+    this.vaultTopOrigin = new THREE.Vector3();
+    this.vaultStandPoint = new THREE.Vector3();
+
+    // เวกเตอร์นำกลับมาใช้ซ้ำ (Reusable Vectors) เพื่อลด Garbage Collection และประหยัดแรม
+    this.moveDelta = new THREE.Vector3();
+    this.moveDir = new THREE.Vector3();
+    this.kneeOrigin = new THREE.Vector3();
+    this.highOrigin = new THREE.Vector3();
+    this.topProbeOrigin = new THREE.Vector3();
+    this.headOrigin = new THREE.Vector3();
+    this.wallNormal = new THREE.Vector3();
+    this.slideDelta = new THREE.Vector3();
 
     this.createStatusHUD();
   }
@@ -154,15 +178,25 @@ export class Player {
 
   snapToCenter(islandMesh) {
     if (!this.characterGroup || !islandMesh) return;
-    this.characterGroup.position.set(0, 50, 0);
     this.velocity.set(0, 0, 0);
-    const rayOrigin = new THREE.Vector3(0, 100, 0);
-    this.raycaster.set(rayOrigin, new THREE.Vector3(0, -1, 0));
+
+    // จุดเกิดบน "เกาะข้างซ้าย" (เกาะแรก)
+    const spawnX = -40;
+    const spawnZ = -25;
+    this.characterGroup.position.set(spawnX, 50, spawnZ);
+    this.facingAngle = Math.PI * 0.35;
+    this.characterGroup.rotation.y = this.facingAngle;
+
+    const rayOrigin = new THREE.Vector3(spawnX, 60, spawnZ);
+    this.raycaster.set(rayOrigin, this.downVector);
+    this.raycaster.far = 120.0;
     const intersects = this.raycaster.intersectObject(islandMesh, true);
     if (intersects.length > 0) {
       this.characterGroup.position.y = intersects[0].point.y + 0.05;
+      this.isGrounded = true;
     } else {
-      this.characterGroup.position.set(0, 5, 0);
+      this.characterGroup.position.set(spawnX, 10.25, spawnZ);
+      this.isGrounded = true;
     }
     this.position.copy(this.characterGroup.position);
   }
@@ -235,6 +269,15 @@ export class Player {
 
         this.characterGroup.position.set(0, 5, 0);
         this.scene.add(this.characterGroup);
+
+        // คำนวณความสูงตัวละครที่แท้จริงด้วย Box3 / Vector3
+        const bbox = new THREE.Box3().setFromObject(this.characterGroup);
+        const bboxSize = new THREE.Vector3();
+        bbox.getSize(bboxSize);
+        if (bboxSize.y > 0.5) {
+          this.characterHeight = bboxSize.y;
+        }
+        this.stepHeight = this.characterHeight * this.stepHeightRatio;
 
         this.mixer = new THREE.AnimationMixer(this.mesh);
 
@@ -322,7 +365,6 @@ export class Player {
         this.dashCooldownTimer = this.dashCooldown;
       }
     } else {
-
       if (input.isMoving) {
         this.velocity.x = input.x * this.moveSpeed;
         this.velocity.z = input.z * this.moveSpeed;
@@ -346,37 +388,144 @@ export class Player {
     while (diff > Math.PI) diff -= Math.PI * 2;
     this.characterGroup.rotation.y += diff * Math.min(1.0, 18.0 * delta);
 
-
     const oldX = this.characterGroup.position.x;
     const oldZ = this.characterGroup.position.z;
     const oldY = this.characterGroup.position.y;
 
-    this.velocity.y += this.gravity * delta;
+    // 1. คำนวณการเคลื่อนที่แนวนอน (Horizontal displacement)
+    this.moveDelta.set(this.velocity.x * delta, 0, this.velocity.z * delta);
+    const moveDist = this.moveDelta.length();
 
-    this.characterGroup.position.x += this.velocity.x * delta;
-    this.characterGroup.position.z += this.velocity.z * delta;
+    if (islandMesh && moveDist > 0.0001) {
+      this.moveDir.copy(this.moveDelta).normalize();
+      const checkDist = moveDist + this.characterRadius;
+
+      // 1.1 ตรวจจับสิ่งกีดขวางด้านหน้าในแนวเดินจริง (ระดับหัวเข่า)
+      // ของที่แขวนอยู่เหนือหัวจะไม่โดนลำแสงนี้เด็ดขาด => ป้องกันบัคเด้งเพราะของบนหัว
+      const kneeHeight = Math.min(0.35, this.stepHeight * 0.45);
+      this.kneeOrigin.set(oldX, oldY + kneeHeight, oldZ);
+      this.raycaster.set(this.kneeOrigin, this.moveDir);
+      this.raycaster.far = checkDist;
+      const frontHits = this.raycaster.intersectObject(islandMesh, true);
+
+      let steppedUp = false;
+
+      if (frontHits.length > 0) {
+        const hit = frontHits[0];
+        const hitDist = hit.distance;
+
+        // 1.2 ตรวจสอบความสูงของสิ่งกีดขวาง: ต้อง "ไม่สูงเกิน 40% ของตัวละคร" (stepHeight)
+        // ยิงลำแสงแนวนอนที่ความสูง stepHeight + 0.05
+        this.highOrigin.set(oldX, oldY + this.stepHeight + 0.05, oldZ);
+        this.raycaster.set(this.highOrigin, this.moveDir);
+        this.raycaster.far = hitDist + 0.35;
+        const highHits = this.raycaster.intersectObject(islandMesh, true);
+
+        // หากลำแสงระดับสูงไม่ชน แสดงว่าบล็อกด้านหน้าสูงไม่เกิน 40% -> ดำเนินการเด้งข้ามบล็อก
+        if (highHits.length === 0) {
+          // หาผิวด้านบนของบล็อกโดยยิงลำแสงดิ่งลง
+          this.topProbeOrigin.set(
+            hit.point.x + this.moveDir.x * 0.20,
+            oldY + this.stepHeight + 0.25,
+            hit.point.z + this.moveDir.z * 0.20
+          );
+          this.raycaster.set(this.topProbeOrigin, this.downVector);
+          this.raycaster.far = this.stepHeight + 0.5;
+          const topHits = this.raycaster.intersectObject(islandMesh, true);
+
+          if (topHits.length > 0) {
+            const topY = topHits[0].point.y;
+            const rise = topY - oldY;
+
+            // สิ่งกีดขวางต้องสูงกว่าพื้นเดิม และต้องไม่เกิน 40%
+            if (rise > 0.02 && rise <= this.stepHeight) {
+              // ตรวจ Headroom: ตรวจสอบว่าไม่มีสิ่งกีดขวางเหนือศีรษะ
+              this.headOrigin.set(this.topProbeOrigin.x, topY + 0.05, this.topProbeOrigin.z);
+              this.raycaster.set(this.headOrigin, this.upVector);
+              this.raycaster.far = this.characterHeight * 0.9;
+              const headHits = this.raycaster.intersectObject(islandMesh, true);
+
+              if (headHits.length === 0) {
+                // เด้งข้ามบล็อกขึ้นไปยืนทันทีตามคำสั่ง!
+                this.characterGroup.position.x = oldX + this.moveDelta.x;
+                this.characterGroup.position.z = oldZ + this.moveDelta.z;
+                this.characterGroup.position.y = topY;
+                this.velocity.y = 0;
+                this.isGrounded = true;
+                steppedUp = true;
+              }
+            }
+          }
+        }
+
+        // หากไม่สามารถเด้งข้ามได้ (เช่น สูงเกิน 40% หรือเป็นกำแพงสูง)
+        // -> ห้ามเดินทะลุเด็ดขาด! ให้เป็นสิ่งกีดขวางข้างหน้าเรา และเลื่อนไถลขนานไปกับกำแพง
+        if (!steppedUp) {
+          if (hit.face && hit.object) {
+            this.wallNormal.copy(hit.face.normal).transformDirection(hit.object.matrixWorld);
+            this.wallNormal.y = 0;
+            this.wallNormal.normalize();
+
+            const intoWall = this.moveDelta.dot(this.wallNormal);
+            if (intoWall < 0) {
+              this.slideDelta.copy(this.moveDelta).sub(
+                this.wallNormal.clone().multiplyScalar(intoWall)
+              );
+              this.characterGroup.position.x = oldX + this.slideDelta.x;
+              this.characterGroup.position.z = oldZ + this.slideDelta.z;
+            } else {
+              this.characterGroup.position.x = oldX;
+              this.characterGroup.position.z = oldZ;
+            }
+
+            // ล็อคระยะห่างไม่ให้เดินทะลุหรือจมเข้าไปในกำแพงเด็ดขาด
+            if (hitDist < this.characterRadius) {
+              const pushDist = this.characterRadius - hitDist;
+              this.characterGroup.position.addScaledVector(this.wallNormal, pushDist);
+            }
+          } else {
+            this.characterGroup.position.x = oldX;
+            this.characterGroup.position.z = oldZ;
+          }
+        }
+      } else {
+        // ไม่มีสิ่งกีดขวางตรงหน้า เคลื่อนที่ตามปกติ
+        this.characterGroup.position.x = oldX + this.moveDelta.x;
+        this.characterGroup.position.z = oldZ + this.moveDelta.z;
+      }
+    } else {
+      this.characterGroup.position.x = oldX + this.moveDelta.x;
+      this.characterGroup.position.z = oldZ + this.moveDelta.z;
+    }
+
+    // 2. จัดการแรงโน้มถ่วงและการยืนบนพื้น (Ground check & Gravity)
+    this.velocity.y += this.gravity * delta;
     this.characterGroup.position.y += this.velocity.y * delta;
 
     if (islandMesh) {
+      // ยิงลำแสงจากความสูงที่ครอบคลุมเนินเขาและภูมิประเทศของเกาะ
+      const castOriginY = Math.max(oldY, this.characterGroup.position.y) + 3.5;
       this.rayOrigin.set(
         this.characterGroup.position.x,
-        oldY + 2.5,
+        castOriginY,
         this.characterGroup.position.z
       );
       this.raycaster.set(this.rayOrigin, this.downVector);
+      this.raycaster.far = 50.0;
 
-      const intersects = this.raycaster.intersectObject(islandMesh, true);
+      const groundHits = this.raycaster.intersectObject(islandMesh, true);
 
-      if (intersects.length > 0) {
-        const groundHeight = intersects[0].point.y;
+      // กรองเฉพาะจุดตกกระทบที่ไม่สูงเกินระดับศีรษะ (ไม่เอาของที่ลอยอยู่เหนือหัว เพื่อป้องกันบัคของบนหัว)
+      const validGround = groundHits.find(
+        (h) => h.point.y <= oldY + this.stepHeight + 0.35
+      );
 
-        // ถ้าเดินไปข้างหน้าแล้วพื้นข้างหน้าสูงกว่าจุดเดิม (ชนสิ่งกีดขวาง/เนินสูง) จะไม่เด้งขึ้นไป ให้หยุดที่ตำแหน่งเดิม
-        if (this.isGrounded && groundHeight > oldY + 0.35) {
-          this.characterGroup.position.x = oldX;
-          this.characterGroup.position.z = oldZ;
-          this.characterGroup.position.y = oldY;
-        } else if (this.characterGroup.position.y <= groundHeight) {
-          this.characterGroup.position.y = groundHeight;
+      if (validGround) {
+        const groundY = validGround.point.y;
+
+        // ล็อคให้ยืนบนพื้นเกาะเสมอ ไม่จมหรือทะลุลงไปใต้เกาะเด็ดขาด
+        if (this.characterGroup.position.y <= groundY + 0.1) {
+          this.characterGroup.position.y = groundY;
           if (this.velocity.y < 0) {
             this.velocity.y = 0;
           }
@@ -389,10 +538,10 @@ export class Player {
           this.isGrounded = false;
         }
       } else {
-        // ตกออกจากเกาะ รีเซ็ตตำแหน่งกลับสู่เกาะอย่างปลอดภัย
+        this.isGrounded = false;
+        // ตกออกจากเกาะลงน้ำ รีเซ็ตตำแหน่งกลับสู่เกาะข้างซ้าย (เกาะแรก) ทันที
         if (this.characterGroup.position.y < -25) {
-          this.characterGroup.position.set(0, 10, 0);
-          this.velocity.set(0, 0, 0);
+          this.snapToCenter(islandMesh);
         }
       }
     }
